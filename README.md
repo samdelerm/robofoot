@@ -199,13 +199,3 @@ Les deux affichent : terrain en direct, score et chrono (compte à rebours si `-
 
 Dimensions réglementaires (proportions FIFA) : 105 × 68 m, cage de 7,32 m de large. Robots à 8,5 m/s max, tir jusqu'à 22 m/s. Le multiplicateur de vitesse (`--speed` ou panneau d'arbitrage) accélère le temps de jeu simulé indépendamment de ces valeurs physiques.
 
-## Prochaines étapes possibles (à valider ensemble)
-
-1. **Tournois/matchs organisés** : endpoints pour créer un match entre
-   deux équipes précises, minuteur, arrêt automatique en fin de match.
-2. **Règles avancées restantes** (hors-jeu, touches sur les côtés) pour
-   les niveaux les plus avancés — fautes et sorties de but sont déjà
-   gérées (voir plus haut).
-3. **Page de classement / ELO** pour la compétition.
-4. **Gardien privilégié dans sa surface** (rayon de capture du ballon
-   plus grand que les autres joueurs, dans sa propre surface).
