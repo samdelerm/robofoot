@@ -23,8 +23,8 @@ server = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/..."
-Repository = "https://github.com/..."
+Homepage = "https://github.com/samdelerm/robofoot"
+Repository = "https://github.com/samdelerm/robofoot"
 
 [project.scripts]
 robofoot-server = "robofoot.server.run:main"
