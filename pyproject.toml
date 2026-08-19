@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "robofoot"
-version = "0.1.1"
+version = "0.1.2"
 description = "Simulation de football robotique 11 contre 11 pilotable en Python"
 readme = "README.md"
 requires-python = ">=3.10"
