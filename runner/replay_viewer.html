@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>robofoot — visualiseur de replay</title>
+<style>
+  body { background:#0e1a12; color:#eaf5ea; font-family: system-ui, sans-serif; text-align:center; }
+  #field { background:#1c6b2f; border:3px solid #eaf5ea; margin-top: 16px; }
+  #controls { margin-top: 12px; }
+  button, input[type=file] { font-size: 15px; padding: 6px 12px; margin: 0 4px; }
+  #score { font-size: 22px; margin-top: 10px; }
+  #hint { font-size: 13px; color: #a8c9a8; max-width: 640px; margin: 12px auto 0; }
+</style>
+</head>
+<body>
+  <h2>⚽ robofoot — visualiseur de replay</h2>
+  <p id="hint">
+    Charge un fichier JSON récupéré sur <code>GET /replay</code> du serveur
+    (pendant ou après un match) — via le navigateur, <code>curl</code>, ou
+    un script. Format attendu : <code>{"frames": [...], "events": [...]}</code>.
+  </p>
+  <input type="file" id="fileInput" accept=".json">
+  <canvas id="field" width="800" height="480"></canvas>
+  <div id="score">Score : - / -</div>
+  <div id="controls">
+    <button id="playBtn">▶ Lecture</button>
+    <input type="range" id="scrub" min="0" max="0" value="0" style="width:400px">
+    <span id="frameLabel">0 / 0</span>
+  </div>
+
+<script>
+const canvas = document.getElementById('field');
+const ctx = canvas.getContext('2d');
+let FW = 100, FH = 60; // dimensions terrain (écrasées par field.width/height du JSON chargé)
+let scaleX = canvas.width / FW, scaleY = canvas.height / FH;
+
+let frames = [];
+let idx = 0;
+let playing = false;
+let frameDelayMs = 100; // ajusté selon sample_hz du JSON chargé (défaut ~10Hz)
+
+document.getElementById('fileInput').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  const reader = new FileReader();
+  reader.onload = (evt) => {
+    let data;
+    try {
+      data = JSON.parse(evt.target.result);
+    } catch (err) {
+      alert('JSON invalide : ' + err.message);
+      return;
+    }
+    // format renvoyé par GET /replay : {sample_hz, field, frames, events}
+    // (accepte aussi un tableau brut de frames, pour compatibilité)
+    frames = Array.isArray(data) ? data : (data.frames || []);
+    if (data.field && data.field.width && data.field.height) {
+      FW = data.field.width;
+      FH = data.field.height;
+      scaleX = canvas.width / FW;
+      scaleY = canvas.height / FH;
+    }
+    if (data.sample_hz) {
+      frameDelayMs = Math.max(20, 1000 / data.sample_hz);
+    }
+    idx = 0;
+    document.getElementById('scrub').max = Math.max(0, frames.length - 1);
+    draw();
+  };
+  reader.readAsText(file);
+});
+
+document.getElementById('scrub').addEventListener('input', (e) => {
+  idx = parseInt(e.target.value, 10);
+  draw();
+});
+
+document.getElementById('playBtn').addEventListener('click', () => {
+  playing = !playing;
+  document.getElementById('playBtn').textContent = playing ? '⏸ Pause' : '▶ Lecture';
+  if (playing) requestAnimationFrame(loop);
+});
+
+function loop() {
+  if (!playing) return;
+  if (idx < frames.length - 1) {
+    idx++;
+    document.getElementById('scrub').value = idx;
+    draw();
+    setTimeout(() => requestAnimationFrame(loop), frameDelayMs);
+  } else {
+    playing = false;
+    document.getElementById('playBtn').textContent = '▶ Lecture';
+  }
+}
+
+function draw() {
+  if (frames.length === 0) return;
+  const f = frames[idx];
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // terrain
+  ctx.strokeStyle = '#eaf5ea';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(1, 1, canvas.width - 2, canvas.height - 2);
+  ctx.beginPath();
+  ctx.moveTo(canvas.width / 2, 0);
+  ctx.lineTo(canvas.width / 2, canvas.height);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(canvas.width / 2, canvas.height / 2, 40, 0, 2 * Math.PI);
+  ctx.stroke();
+
+  // joueurs : dict {player_id: {team, x, y, has_ball}}
+  for (const pid in f.players) {
+    const p = f.players[pid];
+    ctx.beginPath();
+    ctx.fillStyle = p.team === 'red' ? '#ff6b6b' : '#4da3ff';
+    ctx.arc(p.x * scaleX, p.y * scaleY, 7, 0, 2 * Math.PI);
+    ctx.fill();
+    if (p.has_ball) {
+      ctx.strokeStyle = '#ffe066';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+  }
+
+  // ballon
+  ctx.beginPath();
+  ctx.fillStyle = '#ffffff';
+  ctx.arc(f.ball.x * scaleX, f.ball.y * scaleY, 4, 0, 2 * Math.PI);
+  ctx.fill();
+
+  const score = f.score || { red: 0, blue: 0 };
+  document.getElementById('score').textContent =
+    `Score : ${score.red} / ${score.blue}   —   t = ${f.time_s ?? '?'}s`;
+  document.getElementById('frameLabel').textContent = `${idx} / ${frames.length - 1}`;
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>robofoot — match en direct</title>
+<style>
+  :root {
+    --bg: #0a120d;
+    --panel: #101c14;
+    --panel-border: #1f3325;
+    --pitch-a: #1e5631;
+    --pitch-b: #235f37;
+    --line: rgba(240, 245, 240, 0.55);
+    --ink: #eef3ec;
+    --muted: #86a08f;
+    --red: #e8433a;
+    --red-dim: #7a2b26;
+    --blue: #2f7de0;
+    --blue-dim: #1f4a80;
+    --amber: #ffb703;
+    --mono: 'JetBrains Mono', 'Courier New', ui-monospace, monospace;
+    --sans: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    overflow: hidden;
+  }
+
+  #app {
+    display: flex;
+    height: 100vh;
+  }
+
+  #main-col {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+  }
+
+  /* ---- Barre de possession ---- */
+  #possession {
+    display: flex;
+    align-items: center;
+    height: 22px;
+    flex-shrink: 0;
+    background: #0a140d;
+    border-bottom: 1px solid var(--panel-border);
+  }
+  #possession .bar-red, #possession .bar-blue {
+    height: 100%;
+    display: flex;
+    align-items: center;
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 700;
+    color: #fff;
+    transition: width 0.4s ease;
+    overflow: hidden;
+    white-space: nowrap;
+  }
+  #possession .bar-red { background: var(--red-dim); justify-content: flex-end; padding-right: 6px; }
+  #possession .bar-blue { background: var(--blue-dim); justify-content: flex-start; padding-left: 6px; }
+
+  /* ---- Panneau latéral : fil d'événements ---- */
+  #sidebar {
+    width: 280px;
+    flex-shrink: 0;
+    background: var(--panel);
+    border-left: 1px solid var(--panel-border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  #sidebar-title {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding: 12px 14px 8px;
+    flex-shrink: 0;
+  }
+  #events-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0 10px 10px;
+    display: flex;
+    flex-direction: column-reverse; /* le plus récent en haut */
+    gap: 6px;
+  }
+  .event-row {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 7px 8px;
+    border-radius: 8px;
+    background: #0c1810;
+    border-left: 3px solid var(--muted);
+    font-size: 12.5px;
+    animation: event-in 0.3s ease;
+  }
+  .event-row.red { border-left-color: var(--red); }
+  .event-row.blue { border-left-color: var(--blue); }
+  .event-time {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--muted);
+    flex-shrink: 0;
+  }
+  .event-label { color: var(--ink); }
+  .event-icon { flex-shrink: 0; }
+  @keyframes event-in {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  #events-empty {
+    color: var(--muted);
+    font-size: 12px;
+    padding: 8px;
+    font-style: italic;
+  }
+
+  /* ---- Bannière de fin de match ---- */
+  #finished-banner {
+    position: fixed;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(5, 10, 7, 0.72);
+    z-index: 20;
+    pointer-events: none;
+  }
+  #finished-banner.show { display: flex; }
+  #finished-banner .box {
+    font-family: var(--mono);
+    text-align: center;
+    color: var(--amber);
+    letter-spacing: 0.1em;
+    text-shadow: 0 0 20px rgba(255, 183, 3, 0.6);
+  }
+  #finished-banner .box .big { font-size: clamp(24px, 5vw, 42px); font-weight: 700; }
+  #finished-banner .box .small { font-size: 14px; color: var(--ink); margin-top: 10px; }
+
+  @media (max-width: 760px) {
+    #app { flex-direction: column; }
+    #sidebar { width: 100%; height: 160px; border-left: none; border-top: 1px solid var(--panel-border); }
+  }
+
+  /* ---- Bandeau tableau de score façon panneau LED de stade ---- */
+  #scoreboard {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: clamp(10px, 3vw, 36px);
+    padding: 14px 16px 12px;
+    background: linear-gradient(180deg, #0d1811 0%, #0a140d 100%);
+    border-bottom: 1px solid var(--panel-border);
+    flex-shrink: 0;
+  }
+
+  .team-block { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .team-block.blue { flex-direction: row-reverse; }
+
+  .team-dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    box-shadow: 0 0 8px 1px currentColor;
+    flex-shrink: 0;
+  }
+  .team-dot.red { color: var(--red); background: var(--red); }
+  .team-dot.blue { color: var(--blue); background: var(--blue); }
+
+  .team-name {
+    font-family: var(--mono);
+    font-size: clamp(11px, 2vw, 14px);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+
+  .score-digits {
+    font-family: var(--mono);
+    font-weight: 700;
+    font-size: clamp(30px, 7vw, 52px);
+    line-height: 1;
+    letter-spacing: 0.04em;
+    text-shadow: 0 0 14px currentColor;
+  }
+  .score-digits.red { color: var(--red); }
+  .score-digits.blue { color: var(--blue); }
+
+  .score-sep {
+    font-family: var(--mono);
+    font-size: clamp(20px, 4vw, 32px);
+    color: var(--muted);
+    padding: 0 2px;
+  }
+
+  #clock {
+    font-family: var(--mono);
+    font-size: clamp(13px, 2.4vw, 18px);
+    color: var(--amber);
+    text-shadow: 0 0 10px rgba(255, 183, 3, 0.5);
+    min-width: 4.5ch;
+    text-align: center;
+  }
+
+  /* ---- Terrain ---- */
+  #field-wrap {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 12px;
+    min-height: 0;
+  }
+
+  #field { display: block; max-width: 100%; max-height: 100%; }
+
+  /* ---- Panneau de connexion (discret, coin) ---- */
+  #conn-panel {
+    position: fixed;
+    top: 10px;
+    right: 10px;
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-size: 12px;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    z-index: 5;
+  }
+  #conn-panel.hidden { display: none; }
+
+  #conn-panel input {
+    background: #0a1610;
+    border: 1px solid var(--panel-border);
+    color: var(--ink);
+    border-radius: 6px;
+    padding: 4px 6px;
+    font-family: var(--mono);
+    font-size: 12px;
+    width: 70px;
+  }
+  #conn-panel button {
+    background: var(--pitch-a);
+    color: var(--ink);
+    border: none;
+    border-radius: 6px;
+    padding: 5px 10px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  #conn-panel button:hover { filter: brightness(1.2); }
+
+  #status-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #555;
+    flex-shrink: 0;
+    transition: background 0.2s;
+  }
+  #status-dot.live { background: #4caf50; box-shadow: 0 0 6px 1px #4caf50; }
+  #status-dot.connecting { background: #ffb703; box-shadow: 0 0 6px 1px #ffb703; }
+  #status-dot.error { background: #e8433a; box-shadow: 0 0 6px 1px #e8433a; }
+
+  #toggle-conn {
+    position: fixed;
+    top: 10px;
+    right: 10px;
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    color: var(--muted);
+    border-radius: 8px;
+    width: 28px; height: 28px;
+    font-size: 13px;
+    cursor: pointer;
+    z-index: 4;
+  }
+
+  /* ---- Panneau d'arbitrage ---- */
+  #toggle-ref {
+    position: fixed;
+    top: 10px;
+    right: 46px;
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    color: var(--muted);
+    border-radius: 8px;
+    width: 28px; height: 28px;
+    font-size: 13px;
+    cursor: pointer;
+    z-index: 4;
+  }
+  #ref-panel {
+    position: fixed;
+    top: 46px;
+    right: 10px;
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 10px;
+    padding: 12px;
+    font-size: 12px;
+    color: var(--muted);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    z-index: 5;
+    width: 210px;
+  }
+  #ref-panel.hidden { display: none; }
+  #ref-panel .ref-title {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  #ref-panel button {
+    background: var(--pitch-a);
+    color: var(--ink);
+    border: none;
+    border-radius: 6px;
+    padding: 7px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    text-align: left;
+  }
+  #ref-panel button:hover { filter: brightness(1.2); }
+  #ref-panel button.danger { background: var(--red-dim); }
+  #ref-panel .speed-row { display: flex; gap: 4px; }
+  #ref-panel .speed-row button { flex: 1; text-align: center; padding: 6px 0; }
+  #ref-panel .speed-row button.active { background: var(--amber); color: #1a1300; font-weight: 700; }
+  #ref-panel input {
+    background: #0a1610;
+    border: 1px solid var(--panel-border);
+    color: var(--ink);
+    border-radius: 6px;
+    padding: 4px 6px;
+    font-family: var(--mono);
+    font-size: 12px;
+    width: 100%;
+  }
+  #ref-status { font-size: 11px; min-height: 14px; }
+  #ref-status.ok { color: #4caf50; }
+  #ref-status.err { color: var(--red); }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="main-col">
+    <div id="scoreboard">
+      <div class="team-block red">
+        <span class="team-dot red"></span>
+        <span class="team-name" id="name-red">ROUGE</span>
+      </div>
+      <div class="score-digits red" id="score-red">0</div>
+      <div id="clock">--:--</div>
+      <div class="score-digits blue" id="score-blue">0</div>
+      <div class="team-block blue">
+        <span class="team-dot blue"></span>
+        <span class="team-name" id="name-blue">BLEU</span>
+      </div>
+    </div>
+
+    <div id="possession">
+      <div class="bar-red" id="bar-red" style="width:50%">50%</div>
+      <div class="bar-blue" id="bar-blue" style="width:50%">50%</div>
+    </div>
+
+    <div id="field-wrap">
+      <canvas id="field" width="1000" height="600"></canvas>
+    </div>
+  </div>
+
+  <div id="sidebar">
+    <div id="sidebar-title">Événements du match</div>
+    <div id="events-list">
+      <div id="events-empty">Aucun événement pour l'instant — le premier but ou la première faute apparaîtra ici.</div>
+    </div>
+  </div>
+</div>
+
+<div id="finished-banner">
+  <div class="box">
+    <div class="big">MATCH TERMINÉ</div>
+    <div class="small" id="finished-score"></div>
+  </div>
+</div>
+
+<button id="toggle-conn" title="Connexion">⚙</button>
+<div id="conn-panel" class="hidden">
+  <span id="status-dot"></span>
+  <input id="host" placeholder="hôte" value="127.0.0.1">
+  <input id="port" placeholder="port" value="8000">
+  <button id="connect-btn">Connecter</button>
+</div>
+
+<button id="toggle-ref" title="Arbitrage">🏁</button>
+<div id="ref-panel" class="hidden">
+  <div class="ref-title">Arbitrage</div>
+  <button id="btn-kickoff">↺ Coup d'envoi (repositionner)</button>
+  <button id="btn-reset" class="danger">⟲ Nouveau match (réinitialiser)</button>
+  <div class="ref-title" style="margin-top:4px">Vitesse du match</div>
+  <div class="speed-row">
+    <button data-speed="0.5">x0.5</button>
+    <button data-speed="1" class="active">x1</button>
+    <button data-speed="2">x2</button>
+    <button data-speed="4">x4</button>
+  </div>
+  <input id="admin-key" placeholder="clé d'arbitrage (si définie)" type="password">
+  <div id="ref-status"></div>
+</div>
+
+<script>
+let FW = 105, FH = 68; // valeurs par défaut, écrasées par /constants à la connexion
+const canvas = document.getElementById('field');
+const ctx = canvas.getContext('2d');
+
+let socket = null;
+let reconnectTimer = null;
+let latestState = null;
+let knownEventKeys = new Set(); // évite les doublons entre catch-up HTTP et flux WebSocket
+
+const hostInput = document.getElementById('host');
+const portInput = document.getElementById('port');
+const statusDot = document.getElementById('status-dot');
+const connPanel = document.getElementById('conn-panel');
+const toggleBtn = document.getElementById('toggle-conn');
+const eventsList = document.getElementById('events-list');
+const eventsEmpty = document.getElementById('events-empty');
+const finishedBanner = document.getElementById('finished-banner');
+
+toggleBtn.addEventListener('click', () => connPanel.classList.toggle('hidden'));
+document.getElementById('connect-btn').addEventListener('click', () => {
+  connect(hostInput.value.trim(), portInput.value.trim());
+});
+
+const refPanel = document.getElementById('ref-panel');
+const refStatus = document.getElementById('ref-status');
+const adminKeyInput = document.getElementById('admin-key');
+document.getElementById('toggle-ref').addEventListener('click', () => refPanel.classList.toggle('hidden'));
+
+async function refAction(path, body) {
+  const host = hostInput.value.trim(), port = portInput.value.trim();
+  refStatus.textContent = '...';
+  refStatus.className = '';
+  try {
+    const res = await fetch(`http://${host}:${port}${path}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Admin-Key': adminKeyInput.value || '',
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (!res.ok) {
+      const detail = await res.json().catch(() => ({}));
+      throw new Error(detail.detail || `Erreur HTTP ${res.status}`);
+    }
+    refStatus.textContent = 'OK';
+    refStatus.className = 'ok';
+  } catch (e) {
+    refStatus.textContent = e.message || 'Échec';
+    refStatus.className = 'err';
+  }
+  setTimeout(() => { refStatus.textContent = ''; refStatus.className = ''; }, 2500);
+}
+
+document.getElementById('btn-kickoff').addEventListener('click', () => refAction('/admin/kickoff'));
+document.getElementById('btn-reset').addEventListener('click', () => {
+  if (confirm('Réinitialiser complètement le match (score, chrono, événements) ?')) {
+    refAction('/admin/reset');
+  }
+});
+document.querySelectorAll('.speed-row button').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    refAction('/admin/speed', { speed: parseFloat(btn.dataset.speed) });
+  });
+});
+
+function updateSpeedButtons(speed) {
+  document.querySelectorAll('.speed-row button').forEach((btn) => {
+    btn.classList.toggle('active', parseFloat(btn.dataset.speed) === speed);
+  });
+}
+
+function setStatus(state) {
+  statusDot.className = state;
+}
+
+function eventKey(ev) {
+  return `${ev.tick}-${ev.type}-${ev.team}-${ev.player || ''}`;
+}
+
+function addEventToPanel(ev) {
+  const key = eventKey(ev);
+  if (knownEventKeys.has(key)) return;
+  knownEventKeys.add(key);
+
+  eventsEmpty.style.display = 'none';
+  const row = document.createElement('div');
+  row.className = 'event-row' + (ev.team ? ' ' + ev.team : '');
+
+  let icon = 'ℹ️', label = '';
+  if (ev.type === 'but') {
+    icon = '⚽';
+    label = `But — équipe ${ev.team === 'red' ? 'rouge' : 'bleue'}`;
+  } else if (ev.type === 'faute') {
+    icon = '🟨';
+    label = `Faute — ${ev.player} (${ev.team === 'red' ? 'rouge' : 'bleue'}) sur ${ev.adversaire}`;
+  } else if (ev.type === 'fin_de_match') {
+    icon = '🏁';
+    label = 'Fin du match';
+  } else if (ev.type === 'coup_d_envoi') {
+    icon = '↺';
+    label = "Coup d'envoi (repositionnement)";
+  }
+
+  const m = Math.floor(ev.time_s / 60).toString().padStart(2, '0');
+  const s = Math.floor(ev.time_s % 60).toString().padStart(2, '0');
+
+  row.innerHTML = `<span class="event-icon">${icon}</span>
+                    <span class="event-time">${m}:${s}</span>
+                    <span class="event-label">${label}</span>`;
+  eventsList.appendChild(row);
+}
+
+async function loadEventHistory(host, port) {
+  try {
+    const res = await fetch(`http://${host}:${port}/events`);
+    const data = await res.json();
+    (data.events || []).forEach(addEventToPanel);
+  } catch (e) {
+    // pas grave : le flux WebSocket rattrapera les prochains événements
+  }
+}
+
+async function loadFieldConstants(host, port) {
+  try {
+    const res = await fetch(`http://${host}:${port}/constants`);
+    const c = await res.json();
+    if (c.field_width) FW = c.field_width;
+    if (c.field_height) FH = c.field_height;
+  } catch (e) {
+    // valeurs par défaut conservées
+  }
+}
+
+function connect(host, port) {
+  if (socket) { try { socket.close(); } catch (e) {} }
+  if (reconnectTimer) clearTimeout(reconnectTimer);
+
+  setStatus('connecting');
+  loadFieldConstants(host, port);
+  loadEventHistory(host, port);
+
+  const url = `ws://${host}:${port}/ws`;
+  socket = new WebSocket(url);
+
+  socket.onopen = () => setStatus('live');
+  socket.onmessage = (evt) => {
+    const msg = JSON.parse(evt.data);
+    if (msg.type === 'state') {
+      latestState = msg;
+      render(msg);
+    }
+  };
+  socket.onerror = () => setStatus('error');
+  socket.onclose = () => {
+    setStatus('error');
+    reconnectTimer = setTimeout(() => connect(host, port), 2000);
+  };
+}
+
+// Auto-configuration : si la page est servie par le serveur lui-même
+// (ex: http://<serveur>:8000/viewer), on se connecte au même hôte.
+function autoConnect() {
+  const params = new URLSearchParams(window.location.search);
+  const host = params.get('host') || window.location.hostname || '127.0.0.1';
+  const port = params.get('port') || window.location.port || '8000';
+  hostInput.value = host;
+  portInput.value = port;
+  connect(host, port);
+}
+autoConnect();
+
+// ---- Rendu ----
+
+function fx(x) { return (x / FW) * canvas.width; }
+function fy(y) { return (y / FH) * canvas.height; }
+
+function drawPitch() {
+  const stripes = 10;
+  const stripeW = canvas.width / stripes;
+  for (let i = 0; i < stripes; i++) {
+    ctx.fillStyle = i % 2 === 0 ? '#1e5631' : '#235f37';
+    ctx.fillRect(i * stripeW, 0, stripeW, canvas.height);
+  }
+
+  ctx.strokeStyle = 'rgba(240,245,240,0.55)';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(1, 1, canvas.width - 2, canvas.height - 2);
+
+  ctx.beginPath();
+  ctx.moveTo(canvas.width / 2, 0);
+  ctx.lineTo(canvas.width / 2, canvas.height);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.arc(canvas.width / 2, canvas.height / 2, fy(9), 0, Math.PI * 2);
+  ctx.stroke();
+
+  // surfaces de but (approximatives, largeur 18m x profondeur 6m)
+  const boxDepth = fx(6);
+  const boxHalf = fy(9);
+  ctx.strokeRect(0, canvas.height / 2 - boxHalf, boxDepth, boxHalf * 2);
+  ctx.strokeRect(canvas.width - boxDepth, canvas.height / 2 - boxHalf, boxDepth, boxHalf * 2);
+
+  // cages
+  const goalHalf = fy(6);
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = 'rgba(240,245,240,0.85)';
+  ctx.beginPath();
+  ctx.moveTo(0, canvas.height / 2 - goalHalf);
+  ctx.lineTo(-8, canvas.height / 2 - goalHalf);
+  ctx.lineTo(-8, canvas.height / 2 + goalHalf);
+  ctx.lineTo(0, canvas.height / 2 + goalHalf);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(canvas.width, canvas.height / 2 - goalHalf);
+  ctx.lineTo(canvas.width + 8, canvas.height / 2 - goalHalf);
+  ctx.lineTo(canvas.width + 8, canvas.height / 2 + goalHalf);
+  ctx.lineTo(canvas.width, canvas.height / 2 + goalHalf);
+  ctx.stroke();
+}
+
+function drawPlayer(p, id) {
+  const x = fx(p.x), y = fy(p.y);
+  const r = 9;
+
+  if (p.has_ball) {
+    ctx.beginPath();
+    ctx.arc(x, y, r + 5, 0, Math.PI * 2);
+    ctx.strokeStyle = '#ffb703';
+    ctx.lineWidth = 2;
+    ctx.shadowColor = '#ffb703';
+    ctx.shadowBlur = 8;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+  }
+
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fillStyle = p.team === 'red' ? '#e8433a' : '#2f7de0';
+  ctx.fill();
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = p.is_goalkeeper ? '#fff' : 'rgba(0,0,0,0.35)';
+  ctx.stroke();
+
+  const num = id.split('_')[1];
+  ctx.fillStyle = '#fff';
+  ctx.font = '600 9px var(--mono)';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(num, x, y + 0.5);
+}
+
+function drawBall(ball) {
+  const x = fx(ball.x), y = fy(ball.y);
+  ctx.beginPath();
+  ctx.arc(x, y, 5, 0, Math.PI * 2);
+  ctx.fillStyle = '#f4f1e8';
+  ctx.shadowColor = 'rgba(0,0,0,0.6)';
+  ctx.shadowBlur = 4;
+  ctx.fill();
+  ctx.shadowBlur = 0;
+}
+
+function formatClock(time_s) {
+  const total = Math.floor(time_s);
+  const m = Math.floor(total / 60).toString().padStart(2, '0');
+  const s = (total % 60).toString().padStart(2, '0');
+  return `${m}:${s}`;
+}
+
+function render(state) {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  drawPitch();
+  for (const [id, p] of Object.entries(state.players)) drawPlayer(p, id);
+  drawBall(state.ball);
+
+  document.getElementById('score-red').textContent = state.score.red;
+  document.getElementById('score-blue').textContent = state.score.blue;
+
+  const clockSource = (state.remaining_s !== null && state.remaining_s !== undefined)
+    ? state.remaining_s : state.time_s;
+  document.getElementById('clock').textContent = formatClock(clockSource);
+
+  if (state.possession_pct) {
+    const barRed = document.getElementById('bar-red');
+    const barBlue = document.getElementById('bar-blue');
+    barRed.style.width = state.possession_pct.red + '%';
+    barBlue.style.width = state.possession_pct.blue + '%';
+    barRed.textContent = state.possession_pct.red + '%';
+    barBlue.textContent = state.possession_pct.blue + '%';
+  }
+
+  (state.events || []).forEach(addEventToPanel);
+
+  if (typeof state.game_speed === 'number') {
+    updateSpeedButtons(state.game_speed);
+  }
+
+  if (state.finished) {
+    finishedBanner.classList.add('show');
+    document.getElementById('finished-score').textContent =
+      `${state.score.red} — ${state.score.blue}`;
+  } else {
+    finishedBanner.classList.remove('show');
+  }
+}
+
+drawPitch(); // rendu initial avant la première donnée reçue
+</script>
+</body>
+</html>

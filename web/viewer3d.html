@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>robofoot — match en direct (3D)</title>
+<style>
+  :root {
+    --bg: #0a120d;
+    --panel: #101c14;
+    --panel-border: #1f3325;
+    --ink: #eef3ec;
+    --muted: #86a08f;
+    --red: #e8433a;
+    --red-dim: #7a2b26;
+    --blue: #2f7de0;
+    --blue-dim: #1f4a80;
+    --amber: #ffb703;
+    --mono: 'JetBrains Mono', 'Courier New', ui-monospace, monospace;
+    --sans: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: #04070a;
+    color: var(--ink);
+    font-family: var(--sans);
+    overflow: hidden;
+  }
+  #app { display: flex; height: 100vh; }
+  #main-col { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+
+  #scoreboard {
+    display: flex; align-items: center; justify-content: center;
+    gap: clamp(10px, 3vw, 36px);
+    padding: 14px 16px 12px;
+    background: linear-gradient(180deg, #0d1811 0%, #0a140d 100%);
+    border-bottom: 1px solid var(--panel-border);
+    flex-shrink: 0;
+    position: relative; z-index: 2;
+  }
+  .team-block { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .team-block.blue { flex-direction: row-reverse; }
+  .team-dot { width: 10px; height: 10px; border-radius: 50%; box-shadow: 0 0 8px 1px currentColor; flex-shrink: 0; }
+  .team-dot.red { color: var(--red); background: var(--red); }
+  .team-dot.blue { color: var(--blue); background: var(--blue); }
+  .team-name { font-family: var(--mono); font-size: clamp(11px, 2vw, 14px); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
+  .score-digits { font-family: var(--mono); font-weight: 700; font-size: clamp(30px, 7vw, 52px); line-height: 1; letter-spacing: 0.04em; text-shadow: 0 0 14px currentColor; }
+  .score-digits.red { color: var(--red); }
+  .score-digits.blue { color: var(--blue); }
+  #clock { font-family: var(--mono); font-size: clamp(13px, 2.4vw, 18px); color: var(--amber); text-shadow: 0 0 10px rgba(255, 183, 3, 0.5); min-width: 4.5ch; text-align: center; }
+
+  #possession { display: flex; align-items: center; height: 22px; flex-shrink: 0; background: #0a140d; border-bottom: 1px solid var(--panel-border); position: relative; z-index: 2; }
+  #possession .bar-red, #possession .bar-blue { height: 100%; display: flex; align-items: center; font-family: var(--mono); font-size: 10px; font-weight: 700; color: #fff; transition: width 0.4s ease; overflow: hidden; white-space: nowrap; }
+  #possession .bar-red { background: var(--red-dim); justify-content: flex-end; padding-right: 6px; }
+  #possession .bar-blue { background: var(--blue-dim); justify-content: flex-start; padding-left: 6px; }
+
+  #scene-wrap { flex: 1; position: relative; min-height: 0; }
+  #scene-wrap canvas { display: block; }
+  #height-badge {
+    position: absolute; bottom: 10px; left: 10px;
+    background: rgba(16,28,20,0.85); border: 1px solid var(--panel-border);
+    border-radius: 8px; padding: 6px 10px; font-family: var(--mono); font-size: 11px;
+    color: var(--amber); display: none;
+  }
+  #height-badge.show { display: block; }
+  #orbit-hint {
+    position: absolute; bottom: 10px; right: 10px;
+    font-size: 10.5px; color: var(--muted); font-family: var(--mono);
+    background: rgba(16,28,20,0.6); padding: 4px 8px; border-radius: 6px;
+  }
+
+  #sidebar { width: 280px; flex-shrink: 0; background: var(--panel); border-left: 1px solid var(--panel-border); display: flex; flex-direction: column; overflow: hidden; }
+  #sidebar-title { font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); padding: 12px 14px 8px; flex-shrink: 0; }
+  #events-list { flex: 1; overflow-y: auto; padding: 0 10px 10px; display: flex; flex-direction: column-reverse; gap: 6px; }
+  .event-row { display: flex; align-items: baseline; gap: 8px; padding: 7px 8px; border-radius: 8px; background: #0c1810; border-left: 3px solid var(--muted); font-size: 12.5px; animation: event-in 0.3s ease; }
+  .event-row.red { border-left-color: var(--red); }
+  .event-row.blue { border-left-color: var(--blue); }
+  .event-time { font-family: var(--mono); font-size: 10.5px; color: var(--muted); flex-shrink: 0; }
+  .event-label { color: var(--ink); }
+  @keyframes event-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+  #events-empty { color: var(--muted); font-size: 12px; padding: 8px; font-style: italic; }
+
+  #finished-banner { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(5, 10, 7, 0.72); z-index: 20; pointer-events: none; }
+  #finished-banner.show { display: flex; }
+  #finished-banner .box { font-family: var(--mono); text-align: center; color: var(--amber); letter-spacing: 0.1em; text-shadow: 0 0 20px rgba(255, 183, 3, 0.6); }
+  #finished-banner .box .big { font-size: clamp(24px, 5vw, 42px); font-weight: 700; }
+  #finished-banner .box .small { font-size: 14px; color: var(--ink); margin-top: 10px; }
+
+  #toggle-conn { position: fixed; top: 10px; right: 10px; background: var(--panel); border: 1px solid var(--panel-border); color: var(--muted); border-radius: 8px; width: 28px; height: 28px; font-size: 13px; cursor: pointer; z-index: 6; }
+  #conn-panel { position: fixed; top: 46px; right: 10px; background: var(--panel); border: 1px solid var(--panel-border); border-radius: 10px; padding: 10px 12px; font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 8px; z-index: 6; }
+  #conn-panel.hidden { display: none; }
+  #conn-panel input { background: #0a1610; border: 1px solid var(--panel-border); color: var(--ink); border-radius: 6px; padding: 4px 6px; font-family: var(--mono); font-size: 12px; width: 70px; }
+  #conn-panel button { background: #1e5631; color: var(--ink); border: none; border-radius: 6px; padding: 5px 10px; font-size: 12px; cursor: pointer; }
+  #status-dot { width: 8px; height: 8px; border-radius: 50%; background: #555; flex-shrink: 0; transition: background 0.2s; }
+  #status-dot.live { background: #4caf50; box-shadow: 0 0 6px 1px #4caf50; }
+  #status-dot.connecting { background: #ffb703; box-shadow: 0 0 6px 1px #ffb703; }
+  #status-dot.error { background: #e8433a; box-shadow: 0 0 6px 1px #e8433a; }
+
+  #toggle-ref { position: fixed; top: 10px; right: 46px; background: var(--panel); border: 1px solid var(--panel-border); color: var(--muted); border-radius: 8px; width: 28px; height: 28px; font-size: 13px; cursor: pointer; z-index: 6; }
+  #ref-panel { position: fixed; top: 46px; right: 46px; background: var(--panel); border: 1px solid var(--panel-border); border-radius: 10px; padding: 12px; font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 8px; z-index: 6; width: 210px; }
+  #ref-panel.hidden { display: none; }
+  #ref-panel .ref-title { font-family: var(--mono); font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+  #ref-panel button { background: #1e5631; color: var(--ink); border: none; border-radius: 6px; padding: 7px 10px; font-size: 12px; cursor: pointer; text-align: left; }
+  #ref-panel button:hover { filter: brightness(1.2); }
+  #ref-panel button.danger { background: var(--red-dim); }
+  #ref-panel .speed-row { display: flex; gap: 4px; }
+  #ref-panel .speed-row button { flex: 1; text-align: center; padding: 6px 0; }
+  #ref-panel .speed-row button.active { background: var(--amber); color: #1a1300; font-weight: 700; }
+  #ref-panel input { background: #0a1610; border: 1px solid var(--panel-border); color: var(--ink); border-radius: 6px; padding: 4px 6px; font-family: var(--mono); font-size: 12px; width: 100%; }
+  #ref-status { font-size: 11px; min-height: 14px; }
+  #ref-status.ok { color: #4caf50; }
+  #ref-status.err { color: var(--red); }
+
+  @media (max-width: 760px) {
+    #app { flex-direction: column; }
+    #sidebar { width: 100%; height: 140px; border-left: none; border-top: 1px solid var(--panel-border); }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="main-col">
+    <div id="scoreboard">
+      <div class="team-block red"><span class="team-dot red"></span><span class="team-name">ROUGE</span></div>
+      <div class="score-digits red" id="score-red">0</div>
+      <div id="clock">--:--</div>
+      <div class="score-digits blue" id="score-blue">0</div>
+      <div class="team-block blue"><span class="team-dot blue"></span><span class="team-name">BLEU</span></div>
+    </div>
+    <div id="possession">
+      <div class="bar-red" id="bar-red" style="width:50%">50%</div>
+      <div class="bar-blue" id="bar-blue" style="width:50%">50%</div>
+    </div>
+    <div id="scene-wrap">
+      <div id="height-badge">Chandelle : <span id="height-value">0.0</span> m</div>
+      <div id="orbit-hint">clic-glisser : orbiter · molette : zoom</div>
+    </div>
+  </div>
+  <div id="sidebar">
+    <div id="sidebar-title">Événements du match</div>
+    <div id="events-list"><div id="events-empty">Aucun événement pour l'instant.</div></div>
+  </div>
+</div>
+
+<div id="finished-banner"><div class="box"><div class="big">MATCH TERMINÉ</div><div class="small" id="finished-score"></div></div></div>
+
+<button id="toggle-conn" title="Connexion">⚙</button>
+<div id="conn-panel" class="hidden">
+  <span id="status-dot"></span>
+  <input id="host" placeholder="hôte" value="127.0.0.1">
+  <input id="port" placeholder="port" value="8000">
+  <button id="connect-btn">Connecter</button>
+</div>
+
+<button id="toggle-ref" title="Arbitrage">🏁</button>
+<div id="ref-panel" class="hidden">
+  <div class="ref-title">Arbitrage</div>
+  <button id="btn-kickoff">↺ Coup d'envoi (repositionner)</button>
+  <button id="btn-reset" class="danger">⟲ Nouveau match (réinitialiser)</button>
+  <div class="ref-title" style="margin-top:4px">Vitesse du match</div>
+  <div class="speed-row">
+    <button data-speed="0.5">x0.5</button>
+    <button data-speed="1" class="active">x1</button>
+    <button data-speed="2">x2</button>
+    <button data-speed="4">x4</button>
+  </div>
+  <input id="admin-key" placeholder="clé d'arbitrage (si définie)" type="password">
+  <div id="ref-status"></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script>
+// ===================== Connexion / données (identique à /viewer) =====================
+let FW = 105, FH = 68;
+let socket = null, reconnectTimer = null;
+let knownEventKeys = new Set();
+
+const hostInput = document.getElementById('host');
+const portInput = document.getElementById('port');
+const statusDot = document.getElementById('status-dot');
+const connPanel = document.getElementById('conn-panel');
+const eventsList = document.getElementById('events-list');
+const eventsEmpty = document.getElementById('events-empty');
+const finishedBanner = document.getElementById('finished-banner');
+
+document.getElementById('toggle-conn').addEventListener('click', () => connPanel.classList.toggle('hidden'));
+document.getElementById('connect-btn').addEventListener('click', () => connect(hostInput.value.trim(), portInput.value.trim()));
+
+function setStatus(s) { statusDot.className = s; }
+
+function eventKey(ev) { return `${ev.tick}-${ev.type}-${ev.team}-${ev.player || ''}`; }
+
+function addEventToPanel(ev) {
+  const key = eventKey(ev);
+  if (knownEventKeys.has(key)) return;
+  knownEventKeys.add(key);
+  eventsEmpty.style.display = 'none';
+  const row = document.createElement('div');
+  row.className = 'event-row' + (ev.team ? ' ' + ev.team : '');
+  let icon = 'ℹ️', label = '';
+  if (ev.type === 'but') { icon = '⚽'; label = `But — équipe ${ev.team === 'red' ? 'rouge' : 'bleue'}`; }
+  else if (ev.type === 'faute') { icon = '🟨'; label = `Faute — ${ev.player} (${ev.team === 'red' ? 'rouge' : 'bleue'}) sur ${ev.adversaire}`; }
+  else if (ev.type === 'fin_de_match') { icon = '🏁'; label = 'Fin du match'; }
+  else if (ev.type === 'coup_d_envoi') { icon = '↺'; label = "Coup d'envoi (repositionnement)"; }
+  const m = Math.floor(ev.time_s / 60).toString().padStart(2, '0');
+  const s = Math.floor(ev.time_s % 60).toString().padStart(2, '0');
+  row.innerHTML = `<span>${icon}</span><span class="event-time">${m}:${s}</span><span class="event-label">${label}</span>`;
+  eventsList.appendChild(row);
+}
+
+async function loadEventHistory(host, port) {
+  try {
+    const res = await fetch(`http://${host}:${port}/events`);
+    const data = await res.json();
+    (data.events || []).forEach(addEventToPanel);
+  } catch (e) {}
+}
+
+async function loadFieldConstants(host, port) {
+  try {
+    const res = await fetch(`http://${host}:${port}/constants`);
+    const c = await res.json();
+    if (c.field_width) FW = c.field_width;
+    if (c.field_height) FH = c.field_height;
+    buildPitch();
+  } catch (e) {}
+}
+
+function connect(host, port) {
+  if (socket) { try { socket.close(); } catch (e) {} }
+  if (reconnectTimer) clearTimeout(reconnectTimer);
+  setStatus('connecting');
+  loadFieldConstants(host, port);
+  loadEventHistory(host, port);
+  loadRobotModel(host, port);
+  socket = new WebSocket(`ws://${host}:${port}/ws`);
+  socket.onopen = () => setStatus('live');
+  socket.onmessage = (evt) => {
+    const msg = JSON.parse(evt.data);
+    if (msg.type === 'state') render(msg);
+  };
+  socket.onerror = () => setStatus('error');
+  socket.onclose = () => { setStatus('error'); reconnectTimer = setTimeout(() => connect(host, port), 2000); };
+}
+
+function autoConnect() {
+  const params = new URLSearchParams(window.location.search);
+  const host = params.get('host') || window.location.hostname || '127.0.0.1';
+  const port = params.get('port') || window.location.port || '8000';
+  hostInput.value = host; portInput.value = port;
+  connect(host, port);
+}
+
+// ---- Panneau d'arbitrage ----
+const refPanel = document.getElementById('ref-panel');
+const refStatus = document.getElementById('ref-status');
+const adminKeyInput = document.getElementById('admin-key');
+document.getElementById('toggle-ref').addEventListener('click', () => refPanel.classList.toggle('hidden'));
+
+async function refAction(path, body) {
+  const host = hostInput.value.trim(), port = portInput.value.trim();
+  refStatus.textContent = '...'; refStatus.className = '';
+  try {
+    const res = await fetch(`http://${host}:${port}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Admin-Key': adminKeyInput.value || '' },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.detail || `Erreur ${res.status}`); }
+    refStatus.textContent = 'OK'; refStatus.className = 'ok';
+  } catch (e) { refStatus.textContent = e.message || 'Échec'; refStatus.className = 'err'; }
+  setTimeout(() => { refStatus.textContent = ''; refStatus.className = ''; }, 2500);
+}
+document.getElementById('btn-kickoff').addEventListener('click', () => refAction('/admin/kickoff'));
+document.getElementById('btn-reset').addEventListener('click', () => {
+  if (confirm('Réinitialiser complètement le match ?')) refAction('/admin/reset');
+});
+document.querySelectorAll('.speed-row button').forEach((btn) => {
+  btn.addEventListener('click', () => refAction('/admin/speed', { speed: parseFloat(btn.dataset.speed) }));
+});
+function updateSpeedButtons(speed) {
+  document.querySelectorAll('.speed-row button').forEach((btn) => {
+    btn.classList.toggle('active', parseFloat(btn.dataset.speed) === speed);
+  });
+}
+
+// ===================== Scène 3D =====================
+const sceneWrap = document.getElementById('scene-wrap');
+const heightBadge = document.getElementById('height-badge');
+const heightValue = document.getElementById('height-value');
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x04070a);
+scene.fog = new THREE.Fog(0x04070a, 90, 220);
+
+const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 500);
+camera.position.set(0, 62, 78);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.shadowMap.enabled = true;
+sceneWrap.appendChild(renderer.domElement);
+
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 0, 0);
+controls.maxPolarAngle = Math.PI * 0.49;
+controls.minDistance = 20;
+controls.maxDistance = 160;
+controls.update();
+
+const hemi = new THREE.HemisphereLight(0xbfd8c8, 0x0a1410, 0.65);
+scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xffffff, 0.9);
+sun.position.set(40, 90, 20);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.left = -80; sun.shadow.camera.right = 80;
+sun.shadow.camera.top = 60; sun.shadow.camera.bottom = -60;
+scene.add(sun);
+
+function resizeRenderer() {
+  const w = sceneWrap.clientWidth, h = sceneWrap.clientHeight;
+  renderer.setSize(w, h);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resizeRenderer);
+
+// -- Terrain (reconstruit dynamiquement quand FW/FH sont connus) --
+let pitchGroup = new THREE.Group();
+scene.add(pitchGroup);
+
+function makeLineTexture(fw, fh) {
+  const scale = 12; // pixels par mètre
+  const cw = Math.round(fw * scale), ch = Math.round(fh * scale);
+  const cvs = document.createElement('canvas');
+  cvs.width = cw; cvs.height = ch;
+  const ctx = cvs.getContext('2d');
+  ctx.fillStyle = '#1e5631';
+  ctx.fillRect(0, 0, cw, ch);
+  const stripes = 10;
+  for (let i = 0; i < stripes; i++) {
+    if (i % 2 === 1) continue;
+    ctx.fillStyle = 'rgba(255,255,255,0.03)';
+    ctx.fillRect(i * cw / stripes, 0, cw / stripes, ch);
+  }
+  ctx.strokeStyle = 'rgba(240,245,240,0.85)';
+  ctx.lineWidth = Math.max(2, scale * 0.12);
+  ctx.strokeRect(4, 4, cw - 8, ch - 8);
+  ctx.beginPath(); ctx.moveTo(cw / 2, 0); ctx.lineTo(cw / 2, ch); ctx.stroke();
+  ctx.beginPath(); ctx.arc(cw / 2, ch / 2, 9.15 * scale, 0, Math.PI * 2); ctx.stroke();
+  const boxDepth = 16.5 * scale, boxHalf = 20.15 * scale;
+  ctx.strokeRect(0, ch / 2 - boxHalf, boxDepth, boxHalf * 2);
+  ctx.strokeRect(cw - boxDepth, ch / 2 - boxHalf, boxDepth, boxHalf * 2);
+  return new THREE.CanvasTexture(cvs);
+}
+
+function buildPitch() {
+  scene.remove(pitchGroup);
+  pitchGroup = new THREE.Group();
+
+  const tex = makeLineTexture(FW, FH);
+  const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(FW, FH),
+    new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95 }),
+  );
+  ground.rotation.x = -Math.PI / 2;
+  ground.receiveShadow = true;
+  pitchGroup.add(ground);
+
+  const goalHalf = 3.66;
+  [-FW / 2, FW / 2].forEach((gx) => {
+    const goal = new THREE.Group();
+    const mat = new THREE.LineBasicMaterial({ color: 0xf0f5f0 });
+    const pts = [
+      new THREE.Vector3(0, 0, -goalHalf), new THREE.Vector3(0, 2.44, -goalHalf),
+      new THREE.Vector3(0, 2.44, goalHalf), new THREE.Vector3(0, 0, goalHalf),
+    ];
+    const geo = new THREE.BufferGeometry().setFromPoints(pts);
+    goal.add(new THREE.Line(geo, mat));
+    goal.position.x = gx;
+    pitchGroup.add(goal);
+  });
+
+  scene.add(pitchGroup);
+}
+buildPitch();
+
+// -- Robots-joueurs (modèle .glb animé) et ballon --
+const playerMeshes = {};
+const NUM_TEXTURE_CACHE = {};
+const WHEEL_TAGS = ['FL', 'FR', 'BL', 'BR'];
+const WHEEL_RADIUS = 0.14; // doit correspondre à web/assets/robot.glb (voir robot_model.py)
+
+let robotTemplate = null;
+let robotLoadUrl = null;
+let pendingRenderState = null;
+const gltfLoader = new THREE.GLTFLoader();
+
+function loadRobotModel(host, port) {
+  const url = `http://${host}:${port}/assets/robot.glb`;
+  if (robotLoadUrl === url) return;
+  robotLoadUrl = url;
+  gltfLoader.load(
+    url,
+    (gltf) => {
+      robotTemplate = gltf.scene;
+      if (pendingRenderState) { const s = pendingRenderState; pendingRenderState = null; render(s); }
+    },
+    undefined,
+    (err) => console.error('Impossible de charger /assets/robot.glb :', err),
+  );
+}
+
+function numberSprite(num, color) {
+  const key = num + '-' + color;
+  if (NUM_TEXTURE_CACHE[key]) return NUM_TEXTURE_CACHE[key];
+  const cvs = document.createElement('canvas');
+  cvs.width = 64; cvs.height = 64;
+  const ctx = cvs.getContext('2d');
+  ctx.fillStyle = color; ctx.beginPath(); ctx.arc(32, 32, 30, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 30px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(String(num), 32, 34);
+  const tex = new THREE.CanvasTexture(cvs);
+  NUM_TEXTURE_CACHE[key] = tex;
+  return tex;
+}
+
+// Angle "avant du modèle -> monde" : +X local du modèle pointe vers
+// (dx, dz) = (cosθ, -sinθ) une fois root.rotation.y = θ appliqué.
+function worldHeading(dx, dz) { return Math.atan2(-dz, dx); }
+function shortestAngleLerp(from, to, t) {
+  let diff = ((to - from + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
+  return from + diff * t;
+}
+
+function getOrCreatePlayer(pid, team, isGk) {
+  if (playerMeshes[pid]) return playerMeshes[pid];
+
+  const root = robotTemplate.clone(true);
+  const bodyMesh = root.getObjectByName('Body');
+  const turretMesh = root.getObjectByName('Turret');
+  const antennaMesh = root.getObjectByName('Antenna');
+  const kickerMesh = root.getObjectByName('Kicker');
+  const wheelMeshes = WHEEL_TAGS.map((tag) => root.getObjectByName('Wheel_' + tag));
+
+  // Matériaux clonés par instance : le glow de possession et l'alerte
+  // de faute doivent rester propres à CHAQUE robot, pas partagés par équipe.
+  bodyMesh.material = bodyMesh.material.clone();
+  bodyMesh.material.color.setHex(team === 'red' ? 0xe8433a : 0x2f7de0);
+  turretMesh.material = turretMesh.material.clone();
+  [bodyMesh, turretMesh, antennaMesh, kickerMesh, ...wheelMeshes].forEach((m) => { m.castShadow = true; });
+
+  const num = pid.split('_')[1];
+  const spriteMat = new THREE.SpriteMaterial({ map: numberSprite(num, team === 'red' ? '#e8433a' : '#2f7de0') });
+  const sprite = new THREE.Sprite(spriteMat);
+  sprite.scale.set(0.9, 0.9, 1);
+  sprite.position.y = 1.7;
+
+  const group = new THREE.Group();
+  group.add(root);
+  group.add(sprite);
+  if (isGk) {
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(0.7, 0.06, 8, 24),
+      new THREE.MeshStandardMaterial({ color: 0xffffff }),
+    );
+    ring.rotation.x = Math.PI / 2;
+    ring.position.y = 0.02;
+    group.add(ring);
+  }
+  scene.add(group);
+
+  const rig = {
+    group, root, bodyMesh, turretMesh, antennaMesh, kickerMesh, wheelMeshes,
+    baseY: { body: bodyMesh.position.y, turret: turretMesh.position.y, antenna: antennaMesh.position.y, kicker: kickerMesh.position.y },
+    heading: team === 'red' ? 0 : Math.PI,
+    turretYaw: 0,
+    wheelSpin: 0,
+    bobPhase: Math.random() * Math.PI * 2,
+    kickFlash: 0,
+    hasBall: false,
+    frozen: false,
+    vx: 0, vy: 0,
+  };
+  playerMeshes[pid] = rig;
+  return rig;
+}
+
+// Anime tous les robots déjà créés : appelé chaque frame (pas à chaque
+// tick réseau) pour un rendu fluide indépendant du débit du serveur.
+function updateRobots(dt, t) {
+  for (const rig of Object.values(playerMeshes)) {
+    const speed = Math.hypot(rig.vx, rig.vy);
+
+    if (speed > 0.3) {
+      const target = worldHeading(rig.vx, rig.vy);
+      rig.heading = shortestAngleLerp(rig.heading, target, 1 - Math.exp(-dt * 8));
+    }
+    let shake = 0;
+    if (rig.frozen) shake = Math.sin(t * 34) * 0.05;
+    rig.root.rotation.y = rig.heading;
+    rig.root.rotation.z = shake;
+
+    // roues : vitesse de rotation proportionnelle à la vitesse réelle du robot
+    rig.wheelSpin += (speed / WHEEL_RADIUS) * dt;
+    rig.wheelMeshes.forEach((w) => { w.rotation.y = rig.wheelSpin; });
+
+    // suspension : léger rebond du châssis synchronisé à la cadence de déplacement
+    rig.bobPhase += dt * (2.2 + speed * 1.6);
+    const bobY = speed > 0.15 ? Math.sin(rig.bobPhase) * 0.035 * Math.min(1, speed / 4) : 0;
+    rig.bodyMesh.position.y = rig.baseY.body + bobY;
+    rig.turretMesh.position.y = rig.baseY.turret + bobY;
+    rig.antennaMesh.position.y = rig.baseY.antenna + bobY;
+    rig.kickerMesh.position.y = rig.baseY.kicker + bobY;
+
+    // antenne : léger ressort qui suit le mouvement (inertie simulée)
+    const antennaTarget = THREE.MathUtils.clamp(-rig.vx * 0.05, -0.35, 0.35);
+    rig.antennaMesh.rotation.z = THREE.MathUtils.lerp(rig.antennaMesh.rotation.z, antennaTarget, 1 - Math.exp(-dt * 6));
+    const antennaTargetX = THREE.MathUtils.clamp(rig.vy * 0.05, -0.35, 0.35);
+    rig.antennaMesh.rotation.x = THREE.MathUtils.lerp(rig.antennaMesh.rotation.x, antennaTargetX, 1 - Math.exp(-dt * 6));
+
+    // tourelle : suit le ballon si proche, sinon balayage idle discret
+    let turretTarget = Math.sin(t * 0.5 + rig.bobPhase) * 0.4;
+    if (latestBall) {
+      const dxBall = worldX(latestBall.x) - rig.group.position.x;
+      const dzBall = worldZ(latestBall.y) - rig.group.position.z;
+      const distBall = Math.hypot(dxBall, dzBall);
+      if (distBall < 16) {
+        turretTarget = worldHeading(dxBall, dzBall) - rig.heading;
+        turretTarget = Math.atan2(Math.sin(turretTarget), Math.cos(turretTarget));
+        turretTarget = THREE.MathUtils.clamp(turretTarget, -2.2, 2.2);
+      }
+    }
+    rig.turretYaw = shortestAngleLerp(rig.turretYaw, turretTarget, 1 - Math.exp(-dt * 5));
+    rig.turretMesh.rotation.y = rig.turretYaw;
+
+    // palette de frappe : pulse de frappe (déclenché quand le robot perd le ballon)
+    if (rig.kickFlash > 0) rig.kickFlash = Math.max(0, rig.kickFlash - dt * 4.5);
+    const dribbleWobble = rig.hasBall ? Math.sin(rig.bobPhase * 0.6) * 0.04 : 0;
+    rig.kickerMesh.rotation.z = -rig.kickFlash * 0.85 + dribbleWobble;
+
+    // alerte de faute : tourelle qui clignote en rouge pendant l'immobilisation
+    if (rig.frozen) {
+      rig.turretMesh.material.emissive.setHex(0xff3b30);
+      rig.turretMesh.material.emissiveIntensity = 0.4 + 0.4 * Math.sin(t * 22);
+    } else if (rig.turretMesh.material.emissiveIntensity !== 0) {
+      rig.turretMesh.material.emissive.setHex(0x000000);
+      rig.turretMesh.material.emissiveIntensity = 0;
+    }
+  }
+}
+
+const ballMesh = new THREE.Mesh(
+  new THREE.SphereGeometry(0.32, 20, 20),
+  new THREE.MeshStandardMaterial({ color: 0xf4f1e8, roughness: 0.4 }),
+);
+ballMesh.castShadow = true;
+scene.add(ballMesh);
+
+const ballShadow = new THREE.Mesh(
+  new THREE.CircleGeometry(0.35, 20),
+  new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.35 }),
+);
+ballShadow.rotation.x = -Math.PI / 2;
+ballShadow.position.y = 0.015;
+scene.add(ballShadow);
+
+function worldX(x) { return x - FW / 2; }
+function worldZ(y) { return y - FH / 2; }
+let latestBall = null;
+
+function renderHud(state) {
+  document.getElementById('score-red').textContent = state.score.red;
+  document.getElementById('score-blue').textContent = state.score.blue;
+  const clockSource = (state.remaining_s !== null && state.remaining_s !== undefined) ? state.remaining_s : state.time_s;
+  const m = Math.floor(clockSource / 60).toString().padStart(2, '0');
+  const s = Math.floor(clockSource % 60).toString().padStart(2, '0');
+  document.getElementById('clock').textContent = `${m}:${s}`;
+
+  if (state.possession_pct) {
+    document.getElementById('bar-red').style.width = state.possession_pct.red + '%';
+    document.getElementById('bar-blue').style.width = state.possession_pct.blue + '%';
+    document.getElementById('bar-red').textContent = state.possession_pct.red + '%';
+    document.getElementById('bar-blue').textContent = state.possession_pct.blue + '%';
+  }
+
+  (state.events || []).forEach(addEventToPanel);
+  if (typeof state.game_speed === 'number') updateSpeedButtons(state.game_speed);
+
+  if (state.finished) {
+    finishedBanner.classList.add('show');
+    document.getElementById('finished-score').textContent = `${state.score.red} — ${state.score.blue}`;
+  } else {
+    finishedBanner.classList.remove('show');
+  }
+}
+
+function render(state) {
+  renderHud(state);
+  if (!robotTemplate) { pendingRenderState = state; return; } // modèle pas encore chargé : robots affichés dès qu'il l'est
+
+  latestBall = state.ball;
+
+  for (const [pid, p] of Object.entries(state.players)) {
+    const rig = getOrCreatePlayer(pid, p.team, p.is_goalkeeper);
+    rig.group.position.set(worldX(p.x), 0, worldZ(p.y));
+    rig.vx = p.vx || 0;
+    rig.vy = p.vy || 0;
+    rig.frozen = !!p.frozen;
+    if (rig.hasBall && !p.has_ball) rig.kickFlash = 1.0; // perte du ballon -> pulse de frappe
+    rig.hasBall = !!p.has_ball;
+    rig.bodyMesh.material.emissive.setHex(rig.hasBall ? 0xffb703 : 0x000000);
+    rig.bodyMesh.material.emissiveIntensity = rig.hasBall ? 0.5 : 0;
+  }
+
+  const bz = state.ball.z || 0;
+  ballMesh.position.set(worldX(state.ball.x), 0.32 + bz, worldZ(state.ball.y));
+  ballShadow.position.set(worldX(state.ball.x), 0.02, worldZ(state.ball.y));
+  const shadowScale = Math.max(0.25, 1 - bz / 8);
+  ballShadow.scale.set(shadowScale, shadowScale, 1);
+  ballShadow.material.opacity = 0.35 * shadowScale;
+
+  if (bz > 0.5) {
+    heightBadge.classList.add('show');
+    heightValue.textContent = bz.toFixed(1);
+  } else {
+    heightBadge.classList.remove('show');
+  }
+}
+
+const clock = new THREE.Clock();
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.1); // évite les sauts d'animation après un onglet en arrière-plan
+  updateRobots(dt, clock.elapsedTime);
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+resizeRenderer();
+animate();
+autoConnect();
+</script>
+</body>
+</html>

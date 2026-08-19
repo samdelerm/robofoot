@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "robofoot"
+version = "0.1.1"
+description = "Simulation de football robotique 11 contre 11 pilotable en Python"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Samuel Legrand"}
+]
+dependencies = [
+    "websocket-client>=1.8,<2"
+]
+
+[project.optional-dependencies]
+server = [
+    "fastapi>=0.115,<1",
+    "uvicorn[standard]>=0.32,<1"
+]
+
+[project.urls]
+Homepage = "https://github.com/..."
+Repository = "https://github.com/..."
+
+[project.scripts]
+robofoot-server = "robofoot.server.run:main"
+
+[tool.setuptools.packages.find]
+include = ["robofoot*"]
+
+[tool.setuptools.package-data]
+robofoot = [
+    "web/assets/*.glb",
+    "web/*.html",
+    "runner/*.html"
+]
